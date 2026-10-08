@@ -30,24 +30,18 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      # ✅ الخطوة الجديدة: دعم معماريات 32-bit و 64-bit
+      # ✅ تعديل آمن لدعم 32-bit و 64-bit باستخدام awk
       - name: Enable 32-bit and 64-bit Architectures
         run: |
-          # البحث عن ملف build.gradle الخاص بوحدة التطبيق (app) وإضافة إعدادات المعمارية
-          # ملاحظة: يقوم هذا الأمر بإضافة ndk { abiFilters ... } داخل defaultConfig
-          find . -name "build.gradle" -path "*/app/*" -exec sed -i '/defaultConfig {/a \        ndk {\n            abiFilters "armeabi-v7a", "arm64-v8a"\n        }' {} +
-          
-          # في حال كان المشروع يستخدم Kotlin DSL (build.gradle.kts)
-          find . -name "build.gradle.kts" -path "*/app/*" -exec sed -i '/defaultConfig {/a \        ndk {\n            abiFilters("armeabi-v7a", "arm64-v8a")\n        }' {} +
-          
-          echo "✅ تم تفعيل دعم 32-bit (armeabi-v7a) و 64-bit (arm64-v8a)"
+          find . -name "build.gradle" -path "*/app/*" -exec awk '/android {/{print; print "    ndk { abiFilters \"armeabi-v7a\", \"arm64-v8a\" }"; next}1' {} > {}.tmp && mv {}.tmp {} \;
+          echo "✅ تم تفعيل دعم 32-bit و 64-bit"
+          echo "---- التحقق من build.gradle ----"
+          cat $(find . -name "build.gradle" -path "*/app/*") | grep -A 2 "ndk"
 
       - name: Change App Name to STTITEN IP TV
         run: |
+          # تعديل ملفات strings.xml فقط (آمن ولا يكسر الكود)
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
-          find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
-          find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
-          find . -name "*.kt" -exec sed -i 's|"OwnTv"|"STTITEN IP TV"|g' {} +
           echo "✅ تم تغيير الاسم إلى STTITEN IP TV"
 
       - name: Setup Gradle properties
