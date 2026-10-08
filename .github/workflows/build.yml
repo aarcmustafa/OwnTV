@@ -3,7 +3,7 @@ name: Build STTITEN IP TV
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch: # يسمح بتشغيل البناء يدوياً
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,29 +23,35 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK components
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses
+
+      - name: Install required Android SDK components
         run: |
-          # تثبيت المكونات الأساسية (يمكن تعديل الأرقام حسب build.gradle إن لزم الأمر)
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      # ✅ الخطوة الجديدة: دعم معماريات 32-bit و 64-bit
+      - name: Enable 32-bit and 64-bit Architectures
+        run: |
+          # البحث عن ملف build.gradle الخاص بوحدة التطبيق (app) وإضافة إعدادات المعمارية
+          # ملاحظة: يقوم هذا الأمر بإضافة ndk { abiFilters ... } داخل defaultConfig
+          find . -name "build.gradle" -path "*/app/*" -exec sed -i '/defaultConfig {/a \        ndk {\n            abiFilters "armeabi-v7a", "arm64-v8a"\n        }' {} +
+          
+          # في حال كان المشروع يستخدم Kotlin DSL (build.gradle.kts)
+          find . -name "build.gradle.kts" -path "*/app/*" -exec sed -i '/defaultConfig {/a \        ndk {\n            abiFilters("armeabi-v7a", "arm64-v8a")\n        }' {} +
+          
+          echo "✅ تم تفعيل دعم 32-bit (armeabi-v7a) و 64-bit (arm64-v8a)"
 
       - name: Change App Name to STTITEN IP TV
         run: |
-          # 1. تعديل ملفات strings.xml (الاسم الظاهر في قائمة التطبيقات)
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
-          
-          # 2. تعديل النصوص المكتوبة مباشرة داخل واجهات Kotlin (Jetpack Compose)
           find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
-          
-          # 3. تعديل النصوص في ملفات XML التقليدية (إن وجدت)
-          find . -name "*.xml" -path "*/res/layout*" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
-          find . -name "*.xml" -path "*/res/layout*" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
-          
-          echo "✅ تم تغيير الاسم إلى STTITEN IP TV في جميع الواجهات"
+          find . -name "*.kt" -exec sed -i 's|"OwnTv"|"STTITEN IP TV"|g' {} +
+          echo "✅ تم تغيير الاسم إلى STTITEN IP TV"
 
       - name: Setup Gradle properties
         run: |
-          # إعدادات لتحسين الذاكرة ومنع فشل Gradle
           echo "org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8" >> gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
           echo "android.useAndroidX=true" >> gradle.properties
