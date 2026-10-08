@@ -69,17 +69,18 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ✅ خطوة تشخيص: التأكد من إصدار Java و Gradle
       - name: Verify Java and Gradle versions
         run: |
           java -version
           echo "JAVA_HOME=$JAVA_HOME"
           ./gradlew --version
 
-      # ✅ بناء الـ APK مع تخطي جميع المهام المسببة للفشل
-      # ✅ إضافة --info و --scan لإظهار الخطأ الحقيقي عند الفشل
+      # ✅ بناء الـ APK مع تسجيل كل شيء في ملف لالتقاط الخطأ الحقيقي
       - name: Build APK
+        id: build_step
+        continue-on-error: true
         run: |
+          set +e
           ./gradlew assembleDebug \
             -x lint \
             -x lintStandardDebug \
@@ -89,11 +90,33 @@ jobs:
             -x check \
             --stacktrace \
             --info \
-            --scan \
+            --console=plain \
             --no-daemon \
-            --no-parallel
+            --no-parallel \
+            --no-configuration-cache \
+            2>&1 | tee build_full_log.txt
+          echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          exit 0
+
+      - name: Upload Full Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-build-log
+          path: build_full_log.txt
+          if-no-files-found: warn
+
+      - name: Show Build Errors Only
+        if: always()
+        run: |
+          echo "=========== EXIT CODE: $EXIT_CODE ==========="
+          echo "=========== الأخطاء الفعلية ==========="
+          grep -E "(error:|e: |FAILURE|Caused by|Unresolved|Cannot|Exception|What went wrong|> Task.*FAILED)" build_full_log.txt | head -100 || echo "لم يتم العثور على أخطاء واضحة"
+          echo "=========== آخر 50 سطر ==========="
+          tail -50 build_full_log.txt
 
       - name: Upload APK to GitHub Artifacts
+        if: env.EXIT_CODE == '0'
         uses: actions/upload-artifact@v4
         with:
           name: STTITEN-IP-TV-Debug-APK
