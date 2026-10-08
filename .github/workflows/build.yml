@@ -12,9 +12,6 @@ jobs:
       - name: Get latest stable tag
         id: tag
         run: |
-          echo "==== جميع الوسوم (Tags) المتاحة ===="
-          curl -s "https://api.github.com/repos/ahXN00/OwnTV/tags" | grep -oP '"name":\s*"\K[^"]+' | head -10
-          
           LATEST=$(curl -s "https://api.github.com/repos/ahXN00/OwnTV/tags" | grep -oP '"name":\s*"\K[^"]+' | head -1)
           echo "الوسم المستخدم: $LATEST"
           echo "tag=$LATEST" >> $GITHUB_OUTPUT
@@ -55,20 +52,50 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: sttiten-gradle-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-gradle-${{ steps.tag.outputs.tag }}-
+          key: sttiten-v2-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-v2-${{ steps.tag.outputs.tag }}-
 
-      - name: Show versions in libs.versions.toml
+      # ✅ الخطوة الأهم: تغيير الاسم في كل مكان
+      - name: Change App Name to STTITEN IP TV (everywhere)
         working-directory: source
         run: |
-          echo "==== النسخ المستخدمة في هذا الوسم ===="
-          grep -E "owntvCore|playerCore|libmpv" gradle/libs.versions.toml || cat gradle/libs.versions.toml
-
-      - name: Change App Name to STTITEN IP TV
-        working-directory: source
-        run: |
-          find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
-          echo "✅ تم تغيير الاسم"
+          echo "========== قبل التعديل: البحث عن OwnTV =========="
+          echo "--- في strings.xml ---"
+          grep -rln "OwnTV\|Own TV\|Own Tv" --include="strings.xml" . | head -20 || echo "لا يوجد"
+          
+          echo "--- في ملفات Kotlin (نصوص حرفية) ---"
+          grep -rln '"OwnTV"\|"Own TV"\|"Own Tv"' --include="*.kt" . | head -20 || echo "لا يوجد"
+          
+          echo ""
+          echo "========== تطبيق التعديلات =========="
+          
+          # 1. تعديل strings.xml في كل اللغات
+          find . -name "strings.xml" -exec sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
+          echo "✅ تم تعديل strings.xml"
+          
+          # 2. تعديل النصوص الحرفية في Kotlin (فقط داخل " ")
+          find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
+          find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
+          find . -name "*.kt" -exec sed -i 's|"Own Tv"|"STTITEN IP TV"|g' {} +
+          find . -name "*.kt" -exec sed -i 's|"OwnTV "|"STTITEN IP TV "|g' {} +
+          find . -name "*.kt" -exec sed -i 's|" OwnTV"|" STTITEN IP TV"|g' {} +
+          find . -name "*.kt" -exec sed -i 's|"Own TV "|"STTITEN IP TV "|g' {} +
+          find . -name "*.kt" -exec sed -i 's|" Own TV"|" STTITEN IP TV"|g' {} +
+          echo "✅ تم تعديل ملفات Kotlin"
+          
+          # 3. التحقق من عدم بقاء أي نصوص
+          echo ""
+          echo "========== بعد التعديل: التحقق =========="
+          echo "--- ما زال يحتوي على OwnTV في strings.xml: ---"
+          grep -rn ">OwnTV<\|>Own TV<" --include="strings.xml" . | head -5 || echo "لا شيء ✅"
+          
+          echo "--- ما زال يحتوي على \"OwnTV\" في Kotlin: ---"
+          grep -rn '"OwnTV"\|"Own TV"\|"Own Tv"' --include="*.kt" . | head -5 || echo "لا شيء ✅"
+          
+          # 4. عرض بعض النصوص التي تم تعديلها للتأكد
+          echo ""
+          echo "========== عينة من النصوص المعدلة =========="
+          grep -rn "STTITEN IP TV" --include="*.kt" . | head -10
 
       - name: Setup Gradle properties
         working-directory: source
@@ -84,14 +111,22 @@ jobs:
         working-directory: source
         run: chmod +x gradlew
 
-      - name: Build APK
+      # ✅ بناء نسخة ARM فقط (standard flavor) — تعمل على أجهزة Android TV الحقيقية
+      - name: Build ARM APK (standard flavor)
         working-directory: source
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon --no-parallel
+          ./gradlew assembleStandardDebug --stacktrace --no-daemon --no-parallel
 
-      - name: Upload APK to GitHub Artifacts
+      - name: List generated APKs
+        working-directory: source
+        run: |
+          echo "========== ملفات APK الناتجة =========="
+          find . -name "*.apk" -type f -exec ls -lh {} \;
+
+      # ✅ رفع نسخة ARM فقط — لا نرفع x86_64 أبداً
+      - name: Upload ARM APK (STTITEN IP TV)
         uses: actions/upload-artifact@v4
         with:
-          name: STTITEN-IP-TV-${{ steps.tag.outputs.tag }}-Debug-APK
-          path: 'source/**/*.apk'
-          if-no-files-found: warn
+          name: STTITEN-IP-TV-ARM-APK
+          path: 'source/app/build/outputs/apk/standard/debug/*.apk'
+          if-no-files-found: error
