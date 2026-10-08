@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ✅ تم التعديل إلى Java 21 بناءً على متطلبات مشروعك
+      # ✅ Java 21 بناءً على متطلبات مشروعك (toolchainVersion=21)
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -21,6 +21,7 @@ jobs:
           java-package: 'jdk'
           architecture: 'x64'
 
+      # ✅ setup-android v4 لتجنب مشكلة حزمة 'tools' المحذوفة
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
@@ -68,6 +69,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # ✅ خطوة تشخيص: التأكد من إصدار Java و Gradle
+      - name: Verify Java and Gradle versions
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          ./gradlew --version
+
+      # ✅ بناء الـ APK مع تخطي جميع المهام المسببة للفشل
+      # ✅ إضافة --info و --scan لإظهار الخطأ الحقيقي عند الفشل
       - name: Build APK
         run: |
           ./gradlew assembleDebug \
@@ -78,6 +88,8 @@ jobs:
             -x verifyI18nLiterals \
             -x check \
             --stacktrace \
+            --info \
+            --scan \
             --no-daemon \
             --no-parallel
 
