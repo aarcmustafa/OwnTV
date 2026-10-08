@@ -9,11 +9,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout upstream OwnTV
+      - name: Get latest stable tag
+        id: tag
+        run: |
+          echo "==== جميع الوسوم (Tags) المتاحة ===="
+          curl -s "https://api.github.com/repos/ahXN00/OwnTV/tags" | grep -oP '"name":\s*"\K[^"]+' | head -10
+          
+          LATEST=$(curl -s "https://api.github.com/repos/ahXN00/OwnTV/tags" | grep -oP '"name":\s*"\K[^"]+' | head -1)
+          echo "الوسم المستخدم: $LATEST"
+          echo "tag=$LATEST" >> $GITHUB_OUTPUT
+
+      - name: Checkout upstream OwnTV (stable tag)
         uses: actions/checkout@v4
         with:
           repository: ahXN00/OwnTV
-          ref: main
+          ref: ${{ steps.tag.outputs.tag }}
           path: source
           fetch-depth: 1
 
@@ -45,45 +55,14 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: sttiten-gradle-v1-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-gradle-v1-
+          key: sttiten-gradle-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-gradle-${{ steps.tag.outputs.tag }}-
 
-      - name: Detect and update library versions
+      - name: Show versions in libs.versions.toml
         working-directory: source
         run: |
-          echo "==== النسخ المتاحة في Maven ===="
-          
-          echo "--- core ---"
-          CORE_LATEST=$(curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/core/maven-metadata.xml" | grep -oP '(?<=<latest>)[^<]+' || echo "")
-          echo "أحدث نسخة core: $CORE_LATEST"
-          
-          echo "--- player-core ---"
-          PC_LATEST=$(curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/player-core/maven-metadata.xml" | grep -oP '(?<=<latest>)[^<]+' || echo "")
-          echo "أحدث نسخة player-core: $PC_LATEST"
-          
-          echo "--- libmpv ---"
-          MPV_LATEST=$(curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/libmpv/maven-metadata.xml" | grep -oP '(?<=<latest>)[^<]+' || echo "")
-          echo "أحدث نسخة libmpv: $MPV_LATEST"
-          
-          echo ""
-          echo "==== libs.versions.toml (قبل التحديث) ===="
-          cat gradle/libs.versions.toml
-          
-          # تحديث النسخ في libs.versions.toml
-          if [ -n "$CORE_LATEST" ]; then
-            sed -i "s/^owntvCore = \".*\"/owntvCore = \"$CORE_LATEST\"/" gradle/libs.versions.toml
-          fi
-          
-          # libmpv و player-core يستخدمان نفس النسخة عادةً
-          if [ -n "$MPV_LATEST" ]; then
-            sed -i "s/^libmpv = \".*\"/libmpv = \"$MPV_LATEST\"/" gradle/libs.versions.toml
-            sed -i "s/^playerCore = \".*\"/playerCore = \"$MPV_LATEST\"/" gradle/libs.versions.toml || true
-            sed -i "s/^owntvPlayerCore = \".*\"/owntvPlayerCore = \"$MPV_LATEST\"/" gradle/libs.versions.toml || true
-          fi
-          
-          echo ""
-          echo "==== libs.versions.toml (بعد التحديث) ===="
-          cat gradle/libs.versions.toml
+          echo "==== النسخ المستخدمة في هذا الوسم ===="
+          grep -E "owntvCore|playerCore|libmpv" gradle/libs.versions.toml || cat gradle/libs.versions.toml
 
       - name: Change App Name to STTITEN IP TV
         working-directory: source
@@ -108,11 +87,11 @@ jobs:
       - name: Build APK
         working-directory: source
         run: |
-          ./gradlew assembleDebug --refresh-dependencies --stacktrace --no-daemon --no-parallel
+          ./gradlew assembleDebug --stacktrace --no-daemon --no-parallel
 
       - name: Upload APK to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: STTITEN-IP-TV-Debug-APK
+          name: STTITEN-IP-TV-${{ steps.tag.outputs.tag }}-Debug-APK
           path: 'source/**/*.apk'
           if-no-files-found: warn
