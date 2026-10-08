@@ -12,7 +12,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ✅ Java 21 بناءً على متطلبات مشروعك (toolchainVersion=21)
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -21,7 +20,6 @@ jobs:
           java-package: 'jdk'
           architecture: 'x64'
 
-      # ✅ setup-android v4 لتجنب مشكلة حزمة 'tools' المحذوفة
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
@@ -34,7 +32,7 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0" || \
           sdkmanager "platforms;android-34" "build-tools;34.0.0" || \
-          echo "تخطي تثبيت المكونات، سيتم استخدام الموجود"
+          echo "تخطي تثبيت المكونات"
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -46,15 +44,38 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Enable 32-bit and 64-bit Architectures
-        run: |
-          find . -name "build.gradle" -path "*/app/*" -exec awk '/android {/{print; print "    ndk { abiFilters \"armeabi-v7a\", \"arm64-v8a\" }"; next}1' {} > {}.tmp && mv {}.tmp {} \;
-          echo "✅ تم تفعيل دعم 32-bit و 64-bit"
-
       - name: Change App Name to STTITEN IP TV
         run: |
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
           echo "✅ تم تغيير الاسم إلى STTITEN IP TV"
+
+      - name: Add missing string resources
+        run: |
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/strings_extra.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="content_category_restore_hidden">Hidden</string>
+              <string name="content_category_restore_moved">Moved</string>
+              <string name="content_category_restore_order">Order</string>
+              <string name="content_category_restore_custom">Custom</string>
+              <string name="content_category_restore_playlist">Playlist</string>
+              <string name="content_category_restore_nothing">Nothing</string>
+              <string name="content_category_restore_question">Question</string>
+              <string name="settings_customize_restore_defaults">Restore defaults</string>
+              <string name="settings_customize_restore_defaults_title">Restore defaults</string>
+              <string name="settings_customize_restore_defaults_description">Restore defaults</string>
+              <string name="player_reconnecting">Reconnecting</string>
+          </resources>
+          EOF
+
+      - name: Check available core versions
+        run: |
+          echo "=== Available OwnTV Core versions ==="
+          curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/core/maven-metadata.xml" || echo "Could not fetch metadata"
+          echo ""
+          echo "=== Current libs.versions.toml (versions section) ==="
+          grep -A 20 '\[versions\]' gradle/libs.versions.toml || echo "Could not read libs.versions.toml"
 
       - name: Setup Gradle properties
         run: |
@@ -69,54 +90,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Verify Java and Gradle versions
-        run: |
-          java -version
-          echo "JAVA_HOME=$JAVA_HOME"
-          ./gradlew --version
-
-      # ✅ بناء الـ APK مع تسجيل كل شيء في ملف لالتقاط الخطأ الحقيقي
       - name: Build APK
-        id: build_step
-        continue-on-error: true
         run: |
-          set +e
-          ./gradlew assembleDebug \
-            -x lint \
-            -x lintStandardDebug \
-            -x test \
-            -x testStandardDebugUnitTest \
-            -x verifyI18nLiterals \
-            -x check \
-            --stacktrace \
-            --info \
-            --console=plain \
-            --no-daemon \
-            --no-parallel \
-            --no-configuration-cache \
-            2>&1 | tee build_full_log.txt
-          echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
-          exit 0
-
-      - name: Upload Full Build Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-build-log
-          path: build_full_log.txt
-          if-no-files-found: warn
-
-      - name: Show Build Errors Only
-        if: always()
-        run: |
-          echo "=========== EXIT CODE: $EXIT_CODE ==========="
-          echo "=========== الأخطاء الفعلية ==========="
-          grep -E "(error:|e: |FAILURE|Caused by|Unresolved|Cannot|Exception|What went wrong|> Task.*FAILED)" build_full_log.txt | head -100 || echo "لم يتم العثور على أخطاء واضحة"
-          echo "=========== آخر 50 سطر ==========="
-          tail -50 build_full_log.txt
+          ./gradlew assembleDebug --refresh-dependencies --stacktrace --no-daemon --no-parallel
 
       - name: Upload APK to GitHub Artifacts
-        if: env.EXIT_CODE == '0'
         uses: actions/upload-artifact@v4
         with:
           name: STTITEN-IP-TV-Debug-APK
