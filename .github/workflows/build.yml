@@ -52,35 +52,54 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: sttiten-v4-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-v4-${{ steps.tag.outputs.tag }}-
+          key: sttiten-v5-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-v5-${{ steps.tag.outputs.tag }}-
 
-      # ============================================================
-      # 🔍 الخطوة التشخيصية
-      # ============================================================
-      - name: Diagnostic
+      - name: Diagnostic - locale files
         working-directory: source
         run: |
-          echo "===== [1] wordmark files ====="
+          echo "===== [1] locales.json ====="
+          find . -name "locales.json" -exec echo "--- {} ---" \; -exec cat {} \;
+          
+          echo ""
+          echo "===== [2] localeFilters في gradle ====="
+          grep -rn "localeFilters\|localeFilter" --include="*.kts" --include="*.gradle" . 2>/dev/null | head -20
+          
+          echo ""
+          echo "===== [3] wordmark files ====="
           find . -name "*wordmark*" -exec ls -la {} \;
-          
-          echo ""
-          echo "===== [2] BrandLockup.kt ====="
-          find . -name "BrandLockup.kt" -exec cat {} \; 2>/dev/null | head -80
-          
-          echo ""
-          echo "===== [3] About / Developer strings ====="
-          grep -rn "about\|About\|developer\|Developer\|مطور" --include="strings.xml" . 2>/dev/null | head -30
 
       # ============================================================
-      # ✂️ المهمة 1: إنشاء لوجو STTITEN IP TV واستبدال الملفين
+      # ✂️ المهمة 1: قصر اللغة على العربية فقط
+      # ============================================================
+      - name: Restrict to Arabic only (via locales.json)
+        working-directory: source
+        run: |
+          # البحث عن ملف locales.json في المستودع وتعديله ليحتوي على "ar" فقط
+          FOUND=0
+          for FILE in $(find . -name "locales.json" -not -path "*/build/*"); do
+            echo "--- تعديل $FILE ---"
+            echo '["ar"]' > "$FILE"
+            cat "$FILE"
+            FOUND=$((FOUND+1))
+          done
+          
+          if [ "$FOUND" -eq 0 ]; then
+            echo "⚠️ لم يتم العثور على locales.json، إنشاء ملف جديد"
+            mkdir -p tools/i18n
+            echo '["ar"]' > tools/i18n/locales.json
+          fi
+          
+          echo "✅ تم تفعيل اللغة العربية فقط"
+
+      # ============================================================
+      # ✂️ المهمة 2: إنشاء لوجو STTITEN IP TV واستبدال ملفي wordmark
       # ============================================================
       - name: Create STTITEN IP TV logo
         working-directory: source
         run: |
           mkdir -p app/src/main/res/drawable-nodpi
           
-          # إنشاء PNG بخلفية شفافة مع نص أبيض عريض
           convert -size 1200x300 xc:transparent \
             -font DejaVu-Sans-Bold -pointsize 110 \
             -fill "#FFFFFF" -gravity center \
@@ -92,7 +111,6 @@ jobs:
           
           mkdir -p app/src/main/res/drawable
           
-          # استبدال owntv_wordmark_own.xml (الكلمة الأولى)
           cat > app/src/main/res/drawable/owntv_wordmark_own.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
@@ -100,7 +118,6 @@ jobs:
               android:gravity="center" />
           EOF
           
-          # استبدال owntv_wordmark_tv.xml (الكلمة الثانية) بشفاف
           cat > app/src/main/res/drawable/owntv_wordmark_tv.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android"
@@ -113,54 +130,7 @@ jobs:
           echo "✅ تم استبدال ملفي wordmark"
 
       # ============================================================
-      # ✂️ المهمة 2: دعم اللغة العربية فقط
-      # ============================================================
-      - name: Restrict to Arabic only
-        working-directory: source
-        run: |
-          # تعديل build.gradle.kts الخاص بالتطبيق
-          APP_GRADLE="app/build.gradle.kts"
-          
-          if [ -f "$APP_GRADLE" ]; then
-            echo "===== قبل التعديل ====="
-            grep -A 5 "defaultConfig {" "$APP_GRADLE" | head -20
-            
-            # إضافة resourceConfigurations داخل defaultConfig
-            # نستخدم perl للتعامل مع النص متعدد الأسطر
-            perl -i -pe 's/(defaultConfig\s*\{)/$1\n        resourceConfigurations += listOf("ar")/' "$APP_GRADLE"
-            
-            echo "===== بعد التعديل ====="
-            grep -A 3 "defaultConfig {" "$APP_GRADLE" | head -10
-            echo "✅ تم تفعيل اللغة العربية فقط"
-          else
-            echo "⚠️ لم يتم العثور على $APP_GRADLE"
-          fi
-
-      # ============================================================
-      # ✂️ المهمة 3: تعديل قسم "حول التطبيق"
-      # ============================================================
-      - name: Replace About section
-        working-directory: source
-        run: |
-          # استبدال كل النصوص المشابهة لمعلومات المطور
-          for KEY in developer_name developer developer_credit about_developer settings_developer_name settings_about_developer settings_about_developer_name author created_by app_author ; do
-            find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">جلولي مصطفى</string>|g" {} +
-            find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\" translatable=\"false\">[^<]*</string>|<string name=\"$KEY\" translatable=\"false\">جلولي مصطفى</string>|g" {} +
-          done
-          
-          # إزالة أي سطر يحتوي على البريد الإلكتروني أو روابط في قسم about
-          echo "✅ تم تعديل معلومات المطور"
-          
-          # عرض النتيجة
-          echo "===== نصوص About بعد التعديل ====="
-          grep -rn "جلولي مصطفى" --include="strings.xml" . 2>/dev/null | head -10 || echo "لم يتم تعديل أي مفتاح معروف"
-          
-          echo ""
-          echo "===== النصوص التي تحتوي about/developer ====="
-          grep -rn "about\|About\|developer\|Developer" --include="strings.xml" . 2>/dev/null | head -30
-
-      # ============================================================
-      # Build
+      # ✂️ المهمة 3: استبدال الاسم في كل مكان
       # ============================================================
       - name: Change App Name to STTITEN IP TV
         working-directory: source
@@ -168,7 +138,32 @@ jobs:
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
           find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
+          find . -name "*.kt" -exec sed -i 's|"Own Tv"|"STTITEN IP TV"|g' {} +
+          echo "✅ تم تغيير الاسم"
 
+      # ============================================================
+      # ✂️ المهمة 4: قسم "حول التطبيق"
+      # ============================================================
+      - name: Replace About section
+        working-directory: source
+        run: |
+          # سرد النصوص الحالية في about
+          echo "===== نصوص about الحالية ====="
+          grep -rn "about\|About\|developer\|Developer\|مطور" --include="strings.xml" . 2>/dev/null | head -40
+          
+          # محاولة استبدال المفاتيح الشائعة
+          for KEY in developer_name developer developer_credit about_developer \
+                     settings_developer_name settings_about_developer \
+                     settings_about_developer_name author created_by app_author \
+                     settings_about_developer_credit about_credits; do
+            find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">جلولي مصطفى</string>|g" {} +
+          done
+          
+          echo "✅ تم تعديل مفاتيح المطور المعروفة"
+
+      # ============================================================
+      # Build
+      # ============================================================
       - name: Setup Gradle properties
         working-directory: source
         run: |
