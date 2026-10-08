@@ -1,9 +1,9 @@
-name: Build and Send APK to Telegram
+name: Build STTITEN IP TV
 
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch: # يسمح لك بتشغيل البناء يدوياً من واجهة GitHub
+  workflow_dispatch: # يسمح بتشغيله يدوياً من واجهة GitHub
 
 jobs:
   build:
@@ -33,21 +33,8 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Find APK file
-        id: find_apk
-        run: |
-          APK_PATH=$(find . -name "*.apk" -type f | head -n 1)
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          echo "تم العثور على ملف APK في: $APK_PATH"
-
-      - name: Send APK to Telegram
-        if: steps.find_apk.outputs.apk_path != ''
-        uses: appleboy/telegram-action@master
+      - name: Upload APK to GitHub Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          document: ${{ steps.find_apk.outputs.apk_path }}
-          message: |
-            ✅ تم بناء تطبيق STTITEN IP TV بنجاح!
-            📦 نوع البناء: Debug
-            🔗 الإصدار: ${{ github.sha }}
+          name: STTITEN-IP-TV-Debug-APK
+          path: '**/*.apk'
