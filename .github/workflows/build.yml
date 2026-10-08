@@ -9,7 +9,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # ✅ نستنسخ المستودع الأصلي بدلاً من النسخة المكسورة
       - name: Checkout upstream OwnTV
         uses: actions/checkout@v4
         with:
@@ -38,7 +37,7 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0" || \
           sdkmanager "platforms;android-34" "build-tools;34.0.0" || \
-          echo "تخطي تثبيت المكونات"
+          echo "تخطي"
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -46,14 +45,51 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: gradle-
+          key: sttiten-gradle-v1-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-gradle-v1-
+
+      - name: Detect and update library versions
+        working-directory: source
+        run: |
+          echo "==== النسخ المتاحة في Maven ===="
+          
+          echo "--- core ---"
+          CORE_LATEST=$(curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/core/maven-metadata.xml" | grep -oP '(?<=<latest>)[^<]+' || echo "")
+          echo "أحدث نسخة core: $CORE_LATEST"
+          
+          echo "--- player-core ---"
+          PC_LATEST=$(curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/player-core/maven-metadata.xml" | grep -oP '(?<=<latest>)[^<]+' || echo "")
+          echo "أحدث نسخة player-core: $PC_LATEST"
+          
+          echo "--- libmpv ---"
+          MPV_LATEST=$(curl -s "https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/libmpv/maven-metadata.xml" | grep -oP '(?<=<latest>)[^<]+' || echo "")
+          echo "أحدث نسخة libmpv: $MPV_LATEST"
+          
+          echo ""
+          echo "==== libs.versions.toml (قبل التحديث) ===="
+          cat gradle/libs.versions.toml
+          
+          # تحديث النسخ في libs.versions.toml
+          if [ -n "$CORE_LATEST" ]; then
+            sed -i "s/^owntvCore = \".*\"/owntvCore = \"$CORE_LATEST\"/" gradle/libs.versions.toml
+          fi
+          
+          # libmpv و player-core يستخدمان نفس النسخة عادةً
+          if [ -n "$MPV_LATEST" ]; then
+            sed -i "s/^libmpv = \".*\"/libmpv = \"$MPV_LATEST\"/" gradle/libs.versions.toml
+            sed -i "s/^playerCore = \".*\"/playerCore = \"$MPV_LATEST\"/" gradle/libs.versions.toml || true
+            sed -i "s/^owntvPlayerCore = \".*\"/owntvPlayerCore = \"$MPV_LATEST\"/" gradle/libs.versions.toml || true
+          fi
+          
+          echo ""
+          echo "==== libs.versions.toml (بعد التحديث) ===="
+          cat gradle/libs.versions.toml
 
       - name: Change App Name to STTITEN IP TV
         working-directory: source
         run: |
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
-          echo "✅ تم تغيير الاسم إلى STTITEN IP TV"
+          echo "✅ تم تغيير الاسم"
 
       - name: Setup Gradle properties
         working-directory: source
@@ -72,7 +108,7 @@ jobs:
       - name: Build APK
         working-directory: source
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon --no-parallel
+          ./gradlew assembleDebug --refresh-dependencies --stacktrace --no-daemon --no-parallel
 
       - name: Upload APK to GitHub Artifacts
         uses: actions/upload-artifact@v4
