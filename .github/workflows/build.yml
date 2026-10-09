@@ -40,55 +40,39 @@ jobs:
         run: yes | sdkmanager --licenses || true
 
       - name: Install required Android SDK components
-        run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
 
       - name: Install ImageMagick and jq
         run: sudo apt-get update -qq && sudo apt-get install -y imagemagick fonts-dejavu jq unzip zip
 
-      - name: Get core version from toml
+      - name: Get core version
         id: corever
         working-directory: source
         run: |
           VERSION=$(grep -E '^owntvCore = ' gradle/libs.versions.toml | grep -oP '"\K[^"]+')
-          echo "version=$VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Core version: $VERSION"
 
       # ============================================================
-      # 🔥 الأهم: تحميل AAR وتعديل شعاراته
+      # تعديل AAR
       # ============================================================
       - name: Download and modify core AAR
-        working-directory: source
         run: |
           VERSION="${{ steps.corever.outputs.version }}"
           URL="https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/core/$VERSION/core-$VERSION.aar"
           
-          echo "===== تحميل AAR: $URL ====="
           curl -fsSL "$URL" -o /tmp/core-original.aar
-          ls -la /tmp/core-original.aar
+          echo "===== AAR downloaded: $(ls -la /tmp/core-original.aar) ====="
           
-          echo ""
-          echo "===== فك AAR ====="
           rm -rf /tmp/core-extract
           mkdir -p /tmp/core-extract
           cd /tmp/core-extract
           unzip -o /tmp/core-original.aar > /dev/null
           
-          echo "===== محتويات AAR ====="
-          ls -la
+          echo "===== Logo files in AAR ====="
+          find res -type f \( -name "*owntv*" -o -name "*wordmark*" -o -name "*mark*" -o -name "*splash*" -o -name "*banner*" \) 2>/dev/null | sort
           
-          echo ""
-          echo "===== ملفات الشعار ====="
-          find res -type f \( -name "*owntv*" -o -name "*wordmark*" -o -name "*mark_*" -o -name "*splash*" -o -name "*banner*" \) 2>/dev/null | sort
-
-      - name: Replace logos inside AAR
-        run: |
-          cd /tmp/core-extract
-          
-          echo "===== عرض محتوى owntv_wordmark_own.xml الأصلي ====="
-          cat res/drawable/owntv_wordmark_own.xml 2>/dev/null | head -30 || echo "لا يوجد"
-          
-          # إنشاء شعار STTITEN IP TV بصيغة PNG
+          # إنشاء شعار
           mkdir -p res/drawable-nodpi
           convert -size 1200x300 xc:transparent \
             -font DejaVu-Sans-Bold -pointsize 110 \
@@ -96,72 +80,74 @@ jobs:
             -annotate +0+0 "STTITEN IP TV" \
             res/drawable-nodpi/sttiten_logo.png
           
-          # إنشاء أيقونة مربعة
           convert -size 512x512 xc:"#0E1116" \
             -font DejaVu-Sans-Bold -pointsize 90 \
             -fill "#FFFFFF" -gravity center \
             -annotate +0+0 "STTITEN" \
             res/drawable-nodpi/sttiten_icon.png
           
-          # استبدال كل ملفات wordmark و mark و splash بـ bitmap
-          find res -type f \( -name "*owntv_wordmark*" -o -name "*owntv_mark*" -o -name "*owntv_splash*" \) -name "*.xml" | while read f; do
-            echo "=== استبدال: $f ==="
+          # استبدال ملفات الشعار في AAR
+          find res -type f -name "*owntv_wordmark*" -name "*.xml" | while read f; do
             cat > "$f" << 'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
           <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
               android:src="@drawable/sttiten_logo"
               android:gravity="center" />
           XMLEOF
+            echo "✅ $f"
           done
           
-          # استبدال الأيقونات (banner + icons)
-          find res -type f \( -name "*owntv_icon*" -o -name "*owntv_banner*" \) -name "*.xml" | while read f; do
-            echo "=== استبدال: $f ==="
+          find res -type f -name "*owntv_mark*" -name "*.xml" | while read f; do
             cat > "$f" << 'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
           <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
               android:src="@drawable/sttiten_icon"
               android:gravity="center" />
           XMLEOF
+            echo "✅ $f"
           done
           
-          # استبدال أي PNG موجود
-          find res -type f -name "*owntv*" -name "*.png" | while read f; do
-            cp res/drawable-nodpi/sttiten_logo.png "$f"
+          find res -type f \( -name "*owntv_icon*" -o -name "*owntv_banner*" \) -name "*.xml" | while read f; do
+            cat > "$f" << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+              android:src="@drawable/sttiten_icon"
+              android:gravity="center" />
+          XMLEOF
+            echo "✅ $f"
           done
-          
-          echo ""
-          echo "===== التحقق ====="
-          cat res/drawable/owntv_wordmark_own.xml 2>/dev/null || echo "تم الحذف أو استبدال"
-
-      - name: Repack modified AAR
-        run: |
-          cd /tmp/core-extract
           
           # إعادة ضغط AAR
           rm -f /tmp/core-modified.aar
           zip -r /tmp/core-modified.aar . -x "*.DS_Store" > /dev/null
-          
-          ls -la /tmp/core-modified.aar
-          
-          # نسخ إلى المشروع
+          echo "===== Modified AAR: $(ls -la /tmp/core-modified.aar) ====="
+
+      - name: Place AAR in project
+        run: |
           mkdir -p "$GITHUB_WORKSPACE/source/app/libs"
           cp /tmp/core-modified.aar "$GITHUB_WORKSPACE/source/app/libs/core-modified.aar"
-          
-          echo "✅ تم إعادة تجميع AAR"
+          ls -la "$GITHUB_WORKSPACE/source/app/libs/"
 
       # ============================================================
-      # ✂️ تعديل build.gradle.kts لاستخدام AAR المحلي
+      # 🔥 الحل: استبعاد core الأصلي من كل التبعيات
       # ============================================================
-      - name: Point build.gradle to local AAR
+      - name: Patch build.gradle to exclude original core
         working-directory: source
         run: |
           APP_GRADLE="app/build.gradle.kts"
           
-          echo "===== قبل التعديل ====="
-          grep -n "owntv\|core" "$APP_GRADLE" | head -20
+          # عرض الملف الحالي
+          echo "===== قبل التعديل (آخر 30 سطراً) ====="
+          tail -30 "$APP_GRADLE"
           
-          # استبدال dependency core بـ AAR المحلي
+          # إضافة configurations block قبل dependencies
+          # نستخدم marker للتحقق من عدم التكرار
+          if ! grep -q "STTITEN_EXCLUDE_CORE" "$APP_GRADLE"; then
+            # نضيف قبل كتلة dependencies مباشرة
+            perl -i -pe 's/^(dependencies\s*\{)/\/\/ STTITEN_EXCLUDE_CORE\nconfigurations.configureEach {\n    exclude(group = "tv.own.owntv", module = "core")\n}\n\n$1/m' "$APP_GRADLE"
+          fi
+          
+          # استبدال dependency core الأصلي بـ AAR المحلي
           sed -i 's|implementation(libs.owntv.core)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
           sed -i 's|implementation(libs.owntvCore)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
           sed -i 's|api(libs.owntv.core)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
@@ -169,15 +155,10 @@ jobs:
           
           echo ""
           echo "===== بعد التعديل ====="
-          grep -n "core-modified\|owntv" "$APP_GRADLE" | head -20
-          
-          # إضافة flatDir repo إذا لزم
-          if ! grep -q "flatDir" "$APP_GRADLE"; then
-            echo "⚠️ لا يوجد flatDir، سنستخدم files مباشرة"
-          fi
+          grep -n "STTITEN_EXCLUDE_CORE\|core-modified\|owntv" "$APP_GRADLE" | head -20
 
       # ============================================================
-      # ✂️ إزالة Telegram QR
+      # تعديلات أخرى
       # ============================================================
       - name: Remove Telegram QR
         working-directory: source
@@ -185,27 +166,17 @@ jobs:
           find . -name "telegram_qr.*" -delete
           find . -name "*.kt" -exec sed -i 's|R\.drawable\.telegram_qr|R.drawable.sttiten_logo|g' {} + 2>/dev/null || true
           find . -name "*.xml" -exec sed -i 's|@drawable/telegram_qr|@drawable/sttiten_logo|g' {} + 2>/dev/null || true
-          echo "✅ تم حذف Telegram QR"
 
-      # ============================================================
-      # ✂️ تغيير الاسم في كل مكان
-      # ============================================================
-      - name: Change App Name everywhere
+      - name: Change App Name
         working-directory: source
         run: |
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
-          find . -name "strings.xml" -exec sed -i 's|<string name="app_name" translatable="false">.*</string>|<string name="app_name" translatable="false">STTITEN IP TV</string>|g' {} +
           find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own Tv"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"OwnTv"|"STTITEN IP TV"|g' {} +
           find . -name "*.xml" -exec sed -i 's|>OwnTV<|>STTITEN IP TV<|g' {} +
-          find . -name "*.xml" -exec sed -i 's|>Own TV<|>STTITEN IP TV<|g' {} +
-          echo "✅ تم"
 
-      # ============================================================
-      # ✂️ قسم "حول التطبيق"
-      # ============================================================
       - name: Replace About section
         working-directory: source
         run: |
@@ -215,11 +186,7 @@ jobs:
                      settings_about_developer_credit about_credits about_author; do
             find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">جلولي مصطفى</string>|g" {} +
           done
-          echo "✅ تم"
 
-      # ============================================================
-      # ✂️ دعم العربية فقط
-      # ============================================================
       - name: Restrict to Arabic only
         working-directory: source
         run: |
@@ -240,7 +207,6 @@ jobs:
             fi
             rm -f "$f.bak" "$f.new"
           done
-          echo "✅ تم"
 
       # ============================================================
       # Build
