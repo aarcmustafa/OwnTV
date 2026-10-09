@@ -43,8 +43,8 @@ jobs:
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
 
-      - name: Install ImageMagick
-        run: sudo apt-get update -qq && sudo apt-get install -y imagemagick fonts-dejavu
+      - name: Install ImageMagick and jq
+        run: sudo apt-get update -qq && sudo apt-get install -y imagemagick fonts-dejavu jq
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -52,53 +52,99 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: sttiten-v5-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-v5-${{ steps.tag.outputs.tag }}-
-
-      - name: Diagnostic - locale files
-        working-directory: source
-        run: |
-          echo "===== [1] locales.json ====="
-          find . -name "locales.json" -exec echo "--- {} ---" \; -exec cat {} \;
-          
-          echo ""
-          echo "===== [2] localeFilters في gradle ====="
-          grep -rn "localeFilters\|localeFilter" --include="*.kts" --include="*.gradle" . 2>/dev/null | head -20
-          
-          echo ""
-          echo "===== [3] wordmark files ====="
-          find . -name "*wordmark*" -exec ls -la {} \;
+          key: sttiten-v6-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-v6-${{ steps.tag.outputs.tag }}-
 
       # ============================================================
-      # ✂️ المهمة 1: قصر اللغة على العربية فقط
+      # 🔍 تشخيص كامل قبل أي تعديل
       # ============================================================
-      - name: Restrict to Arabic only (via locales.json)
+      - name: Diagnostic - full inspection
         working-directory: source
         run: |
-          # البحث عن ملف locales.json في المستودع وتعديله ليحتوي على "ar" فقط
-          FOUND=0
-          for FILE in $(find . -name "locales.json" -not -path "*/build/*"); do
-            echo "--- تعديل $FILE ---"
-            echo '["ar"]' > "$FILE"
-            cat "$FILE"
-            FOUND=$((FOUND+1))
+          echo "========== [1] محتوى locales.json =========="
+          find . -name "locales.json" -not -path "*/build/*" | while read f; do
+            echo "--- FILE: $f ---"
+            cat "$f"
+            echo ""
           done
           
-          if [ "$FOUND" -eq 0 ]; then
-            echo "⚠️ لم يتم العثور على locales.json، إنشاء ملف جديد"
-            mkdir -p tools/i18n
-            echo '["ar"]' > tools/i18n/locales.json
+          echo "========== [2] build.gradle.kts حول سطر 458 =========="
+          if [ -f build.gradle.kts ]; then
+            echo "--- build.gradle.kts (lines 440-480) ---"
+            sed -n '440,480p' build.gradle.kts
+          fi
+          if [ -f app/build.gradle.kts ]; then
+            echo "--- app/build.gradle.kts (lines 440-480) ---"
+            sed -n '440,480p' app/build.gradle.kts
           fi
           
-          echo "✅ تم تفعيل اللغة العربية فقط"
+          echo "========== [3] wordmark files =========="
+          find . -name "*wordmark*" -not -path "*/build/*" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null
+          
+          echo "========== [4] نصوص about/developer =========="
+          grep -rn 'name="[^"]*about[^"]*"\|name="[^"]*developer[^"]*"\|name="[^"]*credit[^"]*"\|name="[^"]*author[^"]*"' --include="strings.xml" . 2>/dev/null | head -40
+          
+          echo "========== [5] مراجع telegram_qr =========="
+          grep -rn "telegram_qr" --include="*.kt" --include="*.xml" . 2>/dev/null | head -20 || echo "لا يوجد"
 
       # ============================================================
-      # ✂️ المهمة 2: إنشاء لوجو STTITEN IP TV واستبدال ملفي wordmark
+      # ✂️ المهمة 1: تقييد اللغة العربية (باستخدام jq)
+      # ============================================================
+      - name: Restrict to Arabic only (safe jq filter)
+        working-directory: source
+        run: |
+          find . -name "locales.json" -not -path "*/build/*" | while read f; do
+            echo "--- معالجة: $f ---"
+            cp "$f" "$f.bak"
+            
+            # كشف البنية
+            TYPE=$(jq -r 'type' "$f" 2>/dev/null || echo "unknown")
+            echo "النوع: $TYPE"
+            
+            if [ "$TYPE" = "object" ]; then
+              # إذا كان Map: نبقي فقط المفتاح "ar"
+              jq '{ar: .ar}' "$f" > "$f.tmp" 2>/dev/null
+            elif [ "$TYPE" = "array" ]; then
+              # إذا كان Array: نبقي فقط العناصر التي code/ar فيها
+              jq '[.[] | select((.code // .locale // .language // "") == "ar")]' "$f" > "$f.tmp" 2>/dev/null
+            else
+              cp "$f" "$f.tmp"
+            fi
+            
+            # التحقق: هل الملف الجديد غير فارغ؟
+            if [ -s "$f.tmp" ] && jq -e . "$f.tmp" > /dev/null 2>&1; then
+              mv "$f.tmp" "$f"
+              echo "✅ تم التعديل:"
+              cat "$f"
+            else
+              # إرجاع النسخة الأصلية في حال الفشل
+              mv "$f.bak" "$f"
+              echo "⚠️ فشل التعديل، تم إرجاع الأصل"
+            fi
+            rm -f "$f.bak" "$f.tmp"
+          done
+
+      # ============================================================
+      # ✂️ المهمة 2: إزالة Telegram QR
+      # ============================================================
+      - name: Remove Telegram QR
+        working-directory: source
+        run: |
+          find . -name "telegram_qr.jpg" -delete
+          find . -name "telegram_qr.png" -delete
+          find . -name "telegram_qr.xml" -delete
+          find . -name "*.kt" -exec sed -i 's|R\.drawable\.telegram_qr|R.drawable.owntv_wordmark_own|g' {} + 2>/dev/null || true
+          find . -name "*.xml" -exec sed -i 's|@drawable/telegram_qr|@drawable/owntv_wordmark_own|g' {} + 2>/dev/null || true
+          echo "✅ تم حذف Telegram QR"
+
+      # ============================================================
+      # ✂️ المهمة 3: إنشاء اللوجو الجديد
       # ============================================================
       - name: Create STTITEN IP TV logo
         working-directory: source
         run: |
           mkdir -p app/src/main/res/drawable-nodpi
+          mkdir -p app/src/main/res/drawable
           
           convert -size 1200x300 xc:transparent \
             -font DejaVu-Sans-Bold -pointsize 110 \
@@ -107,9 +153,6 @@ jobs:
             app/src/main/res/drawable-nodpi/sttiten_logo.png
           
           ls -la app/src/main/res/drawable-nodpi/sttiten_logo.png
-          echo "✅ تم إنشاء الشعار"
-          
-          mkdir -p app/src/main/res/drawable
           
           cat > app/src/main/res/drawable/owntv_wordmark_own.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -127,12 +170,12 @@ jobs:
           </shape>
           EOF
           
-          echo "✅ تم استبدال ملفي wordmark"
+          echo "✅ تم إنشاء اللوجو واستبدال wordmark"
 
       # ============================================================
-      # ✂️ المهمة 3: استبدال الاسم في كل مكان
+      # ✂️ المهمة 4: تغيير الاسم في كل مكان
       # ============================================================
-      - name: Change App Name to STTITEN IP TV
+      - name: Change App Name
         working-directory: source
         run: |
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
@@ -142,24 +185,19 @@ jobs:
           echo "✅ تم تغيير الاسم"
 
       # ============================================================
-      # ✂️ المهمة 4: قسم "حول التطبيق"
+      # ✂️ المهمة 5: قسم "حول"
       # ============================================================
       - name: Replace About section
         working-directory: source
         run: |
-          # سرد النصوص الحالية في about
-          echo "===== نصوص about الحالية ====="
-          grep -rn "about\|About\|developer\|Developer\|مطور" --include="strings.xml" . 2>/dev/null | head -40
-          
-          # محاولة استبدال المفاتيح الشائعة
           for KEY in developer_name developer developer_credit about_developer \
                      settings_developer_name settings_about_developer \
                      settings_about_developer_name author created_by app_author \
                      settings_about_developer_credit about_credits; do
             find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">جلولي مصطفى</string>|g" {} +
           done
-          
-          echo "✅ تم تعديل مفاتيح المطور المعروفة"
+          echo "✅ تم تحديث مفاتيح المطور"
+          grep -rn "جلولي مصطفى" --include="strings.xml" . 2>/dev/null | head -10 || echo "لم يتم العثور على مفتاح معروف"
 
       # ============================================================
       # Build
