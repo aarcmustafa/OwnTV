@@ -52,80 +52,41 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: sttiten-v6-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-v6-${{ steps.tag.outputs.tag }}-
+          key: sttiten-v7-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-v7-${{ steps.tag.outputs.tag }}-
 
       # ============================================================
-      # 🔍 تشخيص كامل قبل أي تعديل
+      # 🔍 تشخيص شامل: البحث عن كل مكان يظهر فيه OwnTV
       # ============================================================
-      - name: Diagnostic - full inspection
+      - name: Diagnostic - Find all OwnTV occurrences
         working-directory: source
         run: |
-          echo "========== [1] محتوى locales.json =========="
-          find . -name "locales.json" -not -path "*/build/*" | while read f; do
-            echo "--- FILE: $f ---"
-            cat "$f"
-            echo ""
-          done
+          echo "========== [1] في AndroidManifest.xml =========="
+          find . -name "AndroidManifest.xml" -exec grep -l "OwnTV\|Own TV" {} \; 2>/dev/null || echo "لا يوجد"
+          find . -name "AndroidManifest.xml" -exec grep -n "OwnTV\|Own TV" {} \; 2>/dev/null || echo "لا يوجد"
           
-          echo "========== [2] build.gradle.kts حول سطر 458 =========="
-          if [ -f build.gradle.kts ]; then
-            echo "--- build.gradle.kts (lines 440-480) ---"
-            sed -n '440,480p' build.gradle.kts
-          fi
-          if [ -f app/build.gradle.kts ]; then
-            echo "--- app/build.gradle.kts (lines 440-480) ---"
-            sed -n '440,480p' app/build.gradle.kts
-          fi
+          echo ""
+          echo "========== [2] في strings.xml =========="
+          find . -name "strings.xml" -exec grep -n "OwnTV\|Own TV\|Owntv\|OWNTV" {} \; 2>/dev/null | head -30 || echo "لا يوجد"
           
-          echo "========== [3] wordmark files =========="
-          find . -name "*wordmark*" -not -path "*/build/*" -exec echo "--- {} ---" \; -exec cat {} \; 2>/dev/null
+          echo ""
+          echo "========== [3] في ملفات Kotlin =========="
+          grep -rn '"OwnTV"\|"Own TV"\|"Own Tv"\|"OwnTv"' --include="*.kt" . 2>/dev/null | head -30 || echo "لا يوجد"
           
-          echo "========== [4] نصوص about/developer =========="
-          grep -rn 'name="[^"]*about[^"]*"\|name="[^"]*developer[^"]*"\|name="[^"]*credit[^"]*"\|name="[^"]*author[^"]*"' --include="strings.xml" . 2>/dev/null | head -40
+          echo ""
+          echo "========== [4] في ملفات XML (layout, values) =========="
+          grep -rn 'OwnTV\|Own TV\|OwnTv' --include="*.xml" . 2>/dev/null | grep -v "strings.xml" | head -30 || echo "لا يوجد"
           
-          echo "========== [5] مراجع telegram_qr =========="
-          grep -rn "telegram_qr" --include="*.kt" --include="*.xml" . 2>/dev/null | head -20 || echo "لا يوجد"
+          echo ""
+          echo "========== [5] في build.gradle =========="
+          grep -rn "app_name\|resValue" --include="*.gradle*" . 2>/dev/null | head -30 || echo "لا يوجد"
+          
+          echo ""
+          echo "========== [6] محتوى AndroidManifest.xml الرئيسي =========="
+          find . -name "AndroidManifest.xml" -path "*/app/src/main/*" -exec cat {} \; 2>/dev/null | head -100
 
       # ============================================================
-      # ✂️ المهمة 1: تقييد اللغة العربية (باستخدام jq)
-      # ============================================================
-      - name: Restrict to Arabic only (safe jq filter)
-        working-directory: source
-        run: |
-          find . -name "locales.json" -not -path "*/build/*" | while read f; do
-            echo "--- معالجة: $f ---"
-            cp "$f" "$f.bak"
-            
-            # كشف البنية
-            TYPE=$(jq -r 'type' "$f" 2>/dev/null || echo "unknown")
-            echo "النوع: $TYPE"
-            
-            if [ "$TYPE" = "object" ]; then
-              # إذا كان Map: نبقي فقط المفتاح "ar"
-              jq '{ar: .ar}' "$f" > "$f.tmp" 2>/dev/null
-            elif [ "$TYPE" = "array" ]; then
-              # إذا كان Array: نبقي فقط العناصر التي code/ar فيها
-              jq '[.[] | select((.code // .locale // .language // "") == "ar")]' "$f" > "$f.tmp" 2>/dev/null
-            else
-              cp "$f" "$f.tmp"
-            fi
-            
-            # التحقق: هل الملف الجديد غير فارغ؟
-            if [ -s "$f.tmp" ] && jq -e . "$f.tmp" > /dev/null 2>&1; then
-              mv "$f.tmp" "$f"
-              echo "✅ تم التعديل:"
-              cat "$f"
-            else
-              # إرجاع النسخة الأصلية في حال الفشل
-              mv "$f.bak" "$f"
-              echo "⚠️ فشل التعديل، تم إرجاع الأصل"
-            fi
-            rm -f "$f.bak" "$f.tmp"
-          done
-
-      # ============================================================
-      # ✂️ المهمة 2: إزالة Telegram QR
+      # ✂️ المهمة 1: إزالة Telegram QR
       # ============================================================
       - name: Remove Telegram QR
         working-directory: source
@@ -138,7 +99,7 @@ jobs:
           echo "✅ تم حذف Telegram QR"
 
       # ============================================================
-      # ✂️ المهمة 3: إنشاء اللوجو الجديد
+      # ✂️ المهمة 2: إنشاء اللوجو الجديد
       # ============================================================
       - name: Create STTITEN IP TV logo
         working-directory: source
@@ -151,8 +112,6 @@ jobs:
             -fill "#FFFFFF" -gravity center \
             -annotate +0+0 "STTITEN IP TV" \
             app/src/main/res/drawable-nodpi/sttiten_logo.png
-          
-          ls -la app/src/main/res/drawable-nodpi/sttiten_logo.png
           
           cat > app/src/main/res/drawable/owntv_wordmark_own.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -169,23 +128,80 @@ jobs:
               <solid android:color="#00000000" />
           </shape>
           EOF
-          
-          echo "✅ تم إنشاء اللوجو واستبدال wordmark"
+          echo "✅ تم إنشاء اللوجو"
 
       # ============================================================
-      # ✂️ المهمة 4: تغيير الاسم في كل مكان
+      # ✂️ المهمة 3: تغيير الاسم في AndroidManifest.xml
       # ============================================================
-      - name: Change App Name
+      - name: Change App Name in AndroidManifest.xml
         working-directory: source
         run: |
+          find . -name "AndroidManifest.xml" -not -path "*/build/*" | while read f; do
+            echo "--- معالجة: $f ---"
+            # استبدال android:label="OwnTV" مباشرة
+            sed -i 's|android:label="OwnTV"|android:label="@string/app_name"|g' "$f"
+            sed -i 's|android:label="Own TV"|android:label="@string/app_name"|g' "$f"
+            sed -i 's|android:label="@string/app_name"|android:label="@string/app_name"|g' "$f"
+            
+            # إذا كان هناك label بقيمة أخرى غير app_name، استبدلها
+            sed -i 's|android:label="[^"]*"|android:label="@string/app_name"|g' "$f"
+            echo "✅ تم تحديث: $f"
+          done
+          
+          echo "===== التحقق ====="
+          find . -name "AndroidManifest.xml" -not -path "*/build/*" -exec grep -n "android:label" {} \; 2>/dev/null | head -20
+
+      # ============================================================
+      # ✂️ المهمة 4: إضافة resValue في build.gradle لتجاوز أي قيمة قديمة
+      # ============================================================
+      - name: Add resValue to build.gradle
+        working-directory: source
+        run: |
+          APP_GRADLE="app/build.gradle.kts"
+          if [ -f "$APP_GRADLE" ]; then
+            # إضافة resValue داخل defaultConfig
+            if ! grep -q 'resValue("string", "app_name"' "$APP_GRADLE"; then
+              perl -i -pe 's/(defaultConfig\s*\{)/$1\n        resValue("string", "app_name", "STTITEN IP TV")/' "$APP_GRADLE"
+            fi
+            echo "===== defaultConfig بعد التعديل ====="
+            grep -A 10 "defaultConfig {" "$APP_GRADLE" | head -15
+          fi
+          
+          if [ -f "app/build.gradle" ]; then
+            if ! grep -q 'resValue "string", "app_name"' "app/build.gradle"; then
+              perl -i -pe 's/(defaultConfig\s*\{)/$1\n        resValue "string", "app_name", "STTITEN IP TV"/' "app/build.gradle"
+            fi
+            echo "===== defaultConfig بعد التعديل ====="
+            grep -A 10 "defaultConfig {" "app/build.gradle" | head -15
+          fi
+
+      # ============================================================
+      # ✂️ المهمة 5: تغيير الاسم في كل مكان
+      # ============================================================
+      - name: Change App Name everywhere
+        working-directory: source
+        run: |
+          # 1. strings.xml
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
+          
+          # 2. Kotlin
           find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own Tv"|"STTITEN IP TV"|g' {} +
-          echo "✅ تم تغيير الاسم"
+          
+          # 3. XML (layout, values, etc.)
+          find . -name "*.xml" -exec sed -i 's|>OwnTV<|>STTITEN IP TV<|g' {} +
+          find . -name "*.xml" -exec sed -i 's|>Own TV<|>STTITEN IP TV<|g' {} +
+          find . -name "*.xml" -exec sed -i 's|>OwnTv<|>STTITEN IP TV<|g' {} +
+          
+          echo "✅ تم تغيير الاسم في كل مكان"
+          
+          # التحقق
+          echo "===== ما تبقى من OwnTV ====="
+          grep -rn "OwnTV\|Own TV" --include="*.kt" --include="*.xml" --include="*.gradle*" . 2>/dev/null | grep -v "build/" | head -20 || echo "لا شيء ✅"
 
       # ============================================================
-      # ✂️ المهمة 5: قسم "حول"
+      # ✂️ المهمة 6: قسم "حول التطبيق"
       # ============================================================
       - name: Replace About section
         working-directory: source
@@ -197,7 +213,6 @@ jobs:
             find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">جلولي مصطفى</string>|g" {} +
           done
           echo "✅ تم تحديث مفاتيح المطور"
-          grep -rn "جلولي مصطفى" --include="strings.xml" . 2>/dev/null | head -10 || echo "لم يتم العثور على مفتاح معروف"
 
       # ============================================================
       # Build
