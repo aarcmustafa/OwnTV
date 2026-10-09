@@ -44,154 +44,188 @@ jobs:
           sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
 
       - name: Install ImageMagick and jq
-        run: sudo apt-get update -qq && sudo apt-get install -y imagemagick fonts-dejavu jq
+        run: sudo apt-get update -qq && sudo apt-get install -y imagemagick fonts-dejavu jq unzip zip
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: sttiten-v9-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-v9-${{ steps.tag.outputs.tag }}-
-
-      # ============================================================
-      # 🔍 تشخيص: عرض اسم التطبيق في core
-      # ============================================================
-      - name: Diagnostic - core strings
+      - name: Get core version from toml
+        id: corever
         working-directory: source
         run: |
-          echo "===== strings.xml في core ====="
-          find core -name "strings.xml" -exec grep -l "app_name" {} \; 2>/dev/null || echo "لا يوجد"
-          find core -name "strings.xml" -exec grep -n "app_name" {} \; 2>/dev/null || echo "لا يوجد app_name في core"
+          VERSION=$(grep -E '^owntvCore = ' gradle/libs.versions.toml | grep -oP '"\K[^"]+')
+          echo "version=$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # ============================================================
+      # 🔥 الأهم: تحميل AAR وتعديل شعاراته
+      # ============================================================
+      - name: Download and modify core AAR
+        working-directory: source
+        run: |
+          VERSION="${{ steps.corever.outputs.version }}"
+          URL="https://ahxn00.github.io/OwnTV_Core/maven/tv/own/owntv/core/$VERSION/core-$VERSION.aar"
+          
+          echo "===== تحميل AAR: $URL ====="
+          curl -fsSL "$URL" -o /tmp/core-original.aar
+          ls -la /tmp/core-original.aar
           
           echo ""
-          echo "===== AndroidManifest.xml في core ====="
-          find core -name "AndroidManifest.xml" -exec grep -n "android:label" {} \; 2>/dev/null || echo "لا يوجد"
-
-      # ============================================================
-      # ✂️ 1: تغيير app_name في كل الوحدات (app + core)
-      # ============================================================
-      - name: Change app_name everywhere
-        working-directory: source
-        run: |
-          find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
-          find . -name "strings.xml" -exec sed -i 's|<string name="app_name" translatable="false">.*</string>|<string name="app_name" translatable="false">STTITEN IP TV</string>|g' {} +
-          echo "✅ تم تغيير app_name في كل الوحدات"
-
-      # ============================================================
-      # ✂️ 2: تجاوز android:label في AndroidManifest.xml
-      # ============================================================
-      - name: Override android:label in AndroidManifest
-        working-directory: source
-        run: |
-          MANIFEST="app/src/main/AndroidManifest.xml"
+          echo "===== فك AAR ====="
+          rm -rf /tmp/core-extract
+          mkdir -p /tmp/core-extract
+          cd /tmp/core-extract
+          unzip -o /tmp/core-original.aar > /dev/null
           
-          if [ -f "$MANIFEST" ]; then
-            # إضافة tools namespace إذا لم يكن موجوداً
-            if ! grep -q 'xmlns:tools=' "$MANIFEST"; then
-              sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android"|<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"|' "$MANIFEST"
-            fi
-            
-            # إضافة tools:replace إلى application
-            if grep -q 'tools:replace=' "$MANIFEST"; then
-              # إذا كان موجوداً، أضف android:label إليه
-              sed -i 's|tools:replace="\([^"]*\)"|tools:replace="\1,android:label"|' "$MANIFEST"
-            else
-              # إذا لم يكن موجوداً، أضفه
-              sed -i 's|<application|<application\n        tools:replace="android:label"|' "$MANIFEST"
-            fi
-            
-            echo "===== AndroidManifest.xml بعد التعديل ====="
-            grep -n "tools:replace\|android:label\|android:banner" "$MANIFEST" | head -20
+          echo "===== محتويات AAR ====="
+          ls -la
+          
+          echo ""
+          echo "===== ملفات الشعار ====="
+          find res -type f \( -name "*owntv*" -o -name "*wordmark*" -o -name "*mark_*" -o -name "*splash*" -o -name "*banner*" \) 2>/dev/null | sort
+
+      - name: Replace logos inside AAR
+        run: |
+          cd /tmp/core-extract
+          
+          echo "===== عرض محتوى owntv_wordmark_own.xml الأصلي ====="
+          cat res/drawable/owntv_wordmark_own.xml 2>/dev/null | head -30 || echo "لا يوجد"
+          
+          # إنشاء شعار STTITEN IP TV بصيغة PNG
+          mkdir -p res/drawable-nodpi
+          convert -size 1200x300 xc:transparent \
+            -font DejaVu-Sans-Bold -pointsize 110 \
+            -fill "#FFFFFF" -gravity center \
+            -annotate +0+0 "STTITEN IP TV" \
+            res/drawable-nodpi/sttiten_logo.png
+          
+          # إنشاء أيقونة مربعة
+          convert -size 512x512 xc:"#0E1116" \
+            -font DejaVu-Sans-Bold -pointsize 90 \
+            -fill "#FFFFFF" -gravity center \
+            -annotate +0+0 "STTITEN" \
+            res/drawable-nodpi/sttiten_icon.png
+          
+          # استبدال كل ملفات wordmark و mark و splash بـ bitmap
+          find res -type f \( -name "*owntv_wordmark*" -o -name "*owntv_mark*" -o -name "*owntv_splash*" \) -name "*.xml" | while read f; do
+            echo "=== استبدال: $f ==="
+            cat > "$f" << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+              android:src="@drawable/sttiten_logo"
+              android:gravity="center" />
+          XMLEOF
+          done
+          
+          # استبدال الأيقونات (banner + icons)
+          find res -type f \( -name "*owntv_icon*" -o -name "*owntv_banner*" \) -name "*.xml" | while read f; do
+            echo "=== استبدال: $f ==="
+            cat > "$f" << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+              android:src="@drawable/sttiten_icon"
+              android:gravity="center" />
+          XMLEOF
+          done
+          
+          # استبدال أي PNG موجود
+          find res -type f -name "*owntv*" -name "*.png" | while read f; do
+            cp res/drawable-nodpi/sttiten_logo.png "$f"
+          done
+          
+          echo ""
+          echo "===== التحقق ====="
+          cat res/drawable/owntv_wordmark_own.xml 2>/dev/null || echo "تم الحذف أو استبدال"
+
+      - name: Repack modified AAR
+        run: |
+          cd /tmp/core-extract
+          
+          # إعادة ضغط AAR
+          rm -f /tmp/core-modified.aar
+          zip -r /tmp/core-modified.aar . -x "*.DS_Store" > /dev/null
+          
+          ls -la /tmp/core-modified.aar
+          
+          # نسخ إلى المشروع
+          mkdir -p "$GITHUB_WORKSPACE/source/app/libs"
+          cp /tmp/core-modified.aar "$GITHUB_WORKSPACE/source/app/libs/core-modified.aar"
+          
+          echo "✅ تم إعادة تجميع AAR"
+
+      # ============================================================
+      # ✂️ تعديل build.gradle.kts لاستخدام AAR المحلي
+      # ============================================================
+      - name: Point build.gradle to local AAR
+        working-directory: source
+        run: |
+          APP_GRADLE="app/build.gradle.kts"
+          
+          echo "===== قبل التعديل ====="
+          grep -n "owntv\|core" "$APP_GRADLE" | head -20
+          
+          # استبدال dependency core بـ AAR المحلي
+          sed -i 's|implementation(libs.owntv.core)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
+          sed -i 's|implementation(libs.owntvCore)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
+          sed -i 's|api(libs.owntv.core)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
+          sed -i 's|api(libs.owntvCore)|implementation(files("libs/core-modified.aar"))|g' "$APP_GRADLE"
+          
+          echo ""
+          echo "===== بعد التعديل ====="
+          grep -n "core-modified\|owntv" "$APP_GRADLE" | head -20
+          
+          # إضافة flatDir repo إذا لزم
+          if ! grep -q "flatDir" "$APP_GRADLE"; then
+            echo "⚠️ لا يوجد flatDir، سنستخدم files مباشرة"
           fi
 
       # ============================================================
-      # ✂️ 3: إزالة Telegram QR
+      # ✂️ إزالة Telegram QR
       # ============================================================
       - name: Remove Telegram QR
         working-directory: source
         run: |
           find . -name "telegram_qr.*" -delete
-          find . -name "*.kt" -exec sed -i 's|R\.drawable\.telegram_qr|R.drawable.owntv_wordmark_own|g' {} + 2>/dev/null || true
-          find . -name "*.xml" -exec sed -i 's|@drawable/telegram_qr|@drawable/owntv_wordmark_own|g' {} + 2>/dev/null || true
+          find . -name "*.kt" -exec sed -i 's|R\.drawable\.telegram_qr|R.drawable.sttiten_logo|g' {} + 2>/dev/null || true
+          find . -name "*.xml" -exec sed -i 's|@drawable/telegram_qr|@drawable/sttiten_logo|g' {} + 2>/dev/null || true
           echo "✅ تم حذف Telegram QR"
 
       # ============================================================
-      # ✂️ 4: إنشاء اللوجو الجديد
+      # ✂️ تغيير الاسم في كل مكان
       # ============================================================
-      - name: Create STTITEN IP TV logo
+      - name: Change App Name everywhere
         working-directory: source
         run: |
-          mkdir -p app/src/main/res/drawable-nodpi
-          mkdir -p app/src/main/res/drawable
-          
-          convert -size 1200x300 xc:transparent \
-            -font DejaVu-Sans-Bold -pointsize 110 \
-            -fill "#FFFFFF" -gravity center \
-            -annotate +0+0 "STTITEN IP TV" \
-            app/src/main/res/drawable-nodpi/sttiten_logo.png
-          
-          cat > app/src/main/res/drawable/owntv_wordmark_own.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-              android:src="@drawable/sttiten_logo"
-              android:gravity="center" />
-          EOF
-          
-          cat > app/src/main/res/drawable/owntv_wordmark_tv.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"
-              android:shape="rectangle">
-              <size android:width="0dp" android:height="0dp" />
-              <solid android:color="#00000000" />
-          </shape>
-          EOF
-          echo "✅ تم إنشاء اللوجو"
-
-      # ============================================================
-      # ✂️ 5: تغيير الاسم في الكود
-      # ============================================================
-      - name: Replace OwnTV in code
-        working-directory: source
-        run: |
+          find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
+          find . -name "strings.xml" -exec sed -i 's|<string name="app_name" translatable="false">.*</string>|<string name="app_name" translatable="false">STTITEN IP TV</string>|g' {} +
           find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own Tv"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"OwnTv"|"STTITEN IP TV"|g' {} +
           find . -name "*.xml" -exec sed -i 's|>OwnTV<|>STTITEN IP TV<|g' {} +
           find . -name "*.xml" -exec sed -i 's|>Own TV<|>STTITEN IP TV<|g' {} +
-          echo "✅ تم الاستبدال"
+          echo "✅ تم"
 
       # ============================================================
-      # ✂️ 6: قسم "حول التطبيق"
+      # ✂️ قسم "حول التطبيق"
       # ============================================================
-      - name: Replace About developer
+      - name: Replace About section
         working-directory: source
         run: |
-          echo "===== نصوص about/developer ====="
-          grep -rn 'name="[^"]*about[^"]*"\|name="[^"]*developer[^"]*"\|name="[^"]*author[^"]*"\|name="[^"]*credit[^"]*"' --include="strings.xml" . 2>/dev/null | head -40
-          
           for KEY in developer_name developer developer_credit about_developer \
                      settings_developer_name settings_about_developer \
                      settings_about_developer_name author created_by app_author \
                      settings_about_developer_credit about_credits about_author; do
             find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">جلولي مصطفى</string>|g" {} +
-            find . -name "strings.xml" -exec sed -i "s|<string name=\"$KEY\" translatable=\"false\">[^<]*</string>|<string name=\"$KEY\" translatable=\"false\">جلولي مصطفى</string>|g" {} +
           done
-          echo "✅ تم التعديل"
+          echo "✅ تم"
 
       # ============================================================
-      # ✂️ 7: دعم العربية فقط
+      # ✂️ دعم العربية فقط
       # ============================================================
       - name: Restrict to Arabic only
         working-directory: source
         run: |
           find . -name "locales.json" -not -path "*/build/*" | while read f; do
-            echo "--- $f ---"
             cp "$f" "$f.bak"
             TYPE=$(jq -r 'type' "$f" 2>/dev/null || echo "unknown")
-            echo "النوع: $TYPE"
             if [ "$TYPE" = "object" ]; then
               jq 'with_entries(select(.key | startswith("ar")))' "$f" > "$f.new" 2>/dev/null
             elif [ "$TYPE" = "array" ]; then
@@ -201,14 +235,12 @@ jobs:
             fi
             if [ -s "$f.new" ] && jq -e . "$f.new" > /dev/null 2>&1; then
               mv "$f.new" "$f"
-              echo "✅ بعد التعديل:"
-              cat "$f"
             else
               mv "$f.bak" "$f"
-              echo "⚠️ فشل، تم الإرجاع"
             fi
             rm -f "$f.bak" "$f.new"
           done
+          echo "✅ تم"
 
       # ============================================================
       # Build
