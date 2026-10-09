@@ -52,41 +52,62 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: sttiten-v8-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
-          restore-keys: sttiten-v8-${{ steps.tag.outputs.tag }}-
+          key: sttiten-v9-${{ steps.tag.outputs.tag }}-${{ hashFiles('source/**/*.gradle*', 'source/**/gradle-wrapper.properties') }}
+          restore-keys: sttiten-v9-${{ steps.tag.outputs.tag }}-
 
       # ============================================================
-      # 🔍 تشخيص
+      # 🔍 تشخيص: عرض اسم التطبيق في core
       # ============================================================
-      - name: Diagnostic
+      - name: Diagnostic - core strings
         working-directory: source
         run: |
-          echo "===== strings.xml التي تحتوي app_name ====="
-          grep -rn 'name="app_name"' --include="strings.xml" . 2>/dev/null | head -20
+          echo "===== strings.xml في core ====="
+          find core -name "strings.xml" -exec grep -l "app_name" {} \; 2>/dev/null || echo "لا يوجد"
+          find core -name "strings.xml" -exec grep -n "app_name" {} \; 2>/dev/null || echo "لا يوجد app_name في core"
           
           echo ""
-          echo "===== محتوى locales.json ====="
-          find . -name "locales.json" -not -path "*/build/*" -exec echo "--- {} ---" \; -exec cat {} \;
-          
-          echo ""
-          echo "===== أين يُستخدم locales.json في gradle ====="
-          grep -rn "locales" --include="*.kts" . 2>/dev/null | head -20
+          echo "===== AndroidManifest.xml في core ====="
+          find core -name "AndroidManifest.xml" -exec grep -n "android:label" {} \; 2>/dev/null || echo "لا يوجد"
 
       # ============================================================
-      # ✂️ 1: تغيير اسم التطبيق في strings.xml (بكل الطرق)
+      # ✂️ 1: تغيير app_name في كل الوحدات (app + core)
       # ============================================================
-      - name: Change app_name in all strings.xml
+      - name: Change app_name everywhere
         working-directory: source
         run: |
-          # استبدال قوي: أي قيمة لـ app_name
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name">.*</string>|<string name="app_name">STTITEN IP TV</string>|g' {} +
           find . -name "strings.xml" -exec sed -i 's|<string name="app_name" translatable="false">.*</string>|<string name="app_name" translatable="false">STTITEN IP TV</string>|g' {} +
-          
-          echo "===== التحقق ====="
-          grep -rn 'name="app_name"' --include="strings.xml" . 2>/dev/null | head -20
+          echo "✅ تم تغيير app_name في كل الوحدات"
 
       # ============================================================
-      # ✂️ 2: إزالة Telegram QR
+      # ✂️ 2: تجاوز android:label في AndroidManifest.xml
+      # ============================================================
+      - name: Override android:label in AndroidManifest
+        working-directory: source
+        run: |
+          MANIFEST="app/src/main/AndroidManifest.xml"
+          
+          if [ -f "$MANIFEST" ]; then
+            # إضافة tools namespace إذا لم يكن موجوداً
+            if ! grep -q 'xmlns:tools=' "$MANIFEST"; then
+              sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android"|<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools"|' "$MANIFEST"
+            fi
+            
+            # إضافة tools:replace إلى application
+            if grep -q 'tools:replace=' "$MANIFEST"; then
+              # إذا كان موجوداً، أضف android:label إليه
+              sed -i 's|tools:replace="\([^"]*\)"|tools:replace="\1,android:label"|' "$MANIFEST"
+            else
+              # إذا لم يكن موجوداً، أضفه
+              sed -i 's|<application|<application\n        tools:replace="android:label"|' "$MANIFEST"
+            fi
+            
+            echo "===== AndroidManifest.xml بعد التعديل ====="
+            grep -n "tools:replace\|android:label\|android:banner" "$MANIFEST" | head -20
+          fi
+
+      # ============================================================
+      # ✂️ 3: إزالة Telegram QR
       # ============================================================
       - name: Remove Telegram QR
         working-directory: source
@@ -97,7 +118,7 @@ jobs:
           echo "✅ تم حذف Telegram QR"
 
       # ============================================================
-      # ✂️ 3: إنشاء اللوجو الجديد
+      # ✂️ 4: إنشاء اللوجو الجديد
       # ============================================================
       - name: Create STTITEN IP TV logo
         working-directory: source
@@ -129,31 +150,26 @@ jobs:
           echo "✅ تم إنشاء اللوجو"
 
       # ============================================================
-      # ✂️ 4: تغيير الاسم في الكود والنصوص
+      # ✂️ 5: تغيير الاسم في الكود
       # ============================================================
-      - name: Replace OwnTV in code and UI
+      - name: Replace OwnTV in code
         working-directory: source
         run: |
-          # Kotlin: نصوص حرفية
           find . -name "*.kt" -exec sed -i 's|"OwnTV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own TV"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"Own Tv"|"STTITEN IP TV"|g' {} +
           find . -name "*.kt" -exec sed -i 's|"OwnTv"|"STTITEN IP TV"|g' {} +
-          
-          # XML
           find . -name "*.xml" -exec sed -i 's|>OwnTV<|>STTITEN IP TV<|g' {} +
           find . -name "*.xml" -exec sed -i 's|>Own TV<|>STTITEN IP TV<|g' {} +
-          find . -name "*.xml" -exec sed -i 's|>OwnTv<|>STTITEN IP TV<|g' {} +
-          
           echo "✅ تم الاستبدال"
 
       # ============================================================
-      # ✂️ 5: قسم "حول التطبيق"
+      # ✂️ 6: قسم "حول التطبيق"
       # ============================================================
       - name: Replace About developer
         working-directory: source
         run: |
-          echo "===== نصوص about/developer الحالية ====="
+          echo "===== نصوص about/developer ====="
           grep -rn 'name="[^"]*about[^"]*"\|name="[^"]*developer[^"]*"\|name="[^"]*author[^"]*"\|name="[^"]*credit[^"]*"' --include="strings.xml" . 2>/dev/null | head -40
           
           for KEY in developer_name developer developer_credit about_developer \
@@ -166,7 +182,7 @@ jobs:
           echo "✅ تم التعديل"
 
       # ============================================================
-      # ✂️ 6: دعم العربية فقط (باستخدام jq بأمان)
+      # ✂️ 7: دعم العربية فقط
       # ============================================================
       - name: Restrict to Arabic only
         working-directory: source
@@ -174,20 +190,15 @@ jobs:
           find . -name "locales.json" -not -path "*/build/*" | while read f; do
             echo "--- $f ---"
             cp "$f" "$f.bak"
-            
             TYPE=$(jq -r 'type' "$f" 2>/dev/null || echo "unknown")
             echo "النوع: $TYPE"
-            
             if [ "$TYPE" = "object" ]; then
-              # Map: نبقي كل مفتاح يحتوي "ar"
               jq 'with_entries(select(.key | startswith("ar")))' "$f" > "$f.new" 2>/dev/null
             elif [ "$TYPE" = "array" ]; then
-              # Array: نبقي العناصر التي code/tag = ar
               jq '[.[] | select(((.code // .tag // .locale // "") | startswith("ar")))]' "$f" > "$f.new" 2>/dev/null
             else
               cp "$f" "$f.new"
             fi
-            
             if [ -s "$f.new" ] && jq -e . "$f.new" > /dev/null 2>&1; then
               mv "$f.new" "$f"
               echo "✅ بعد التعديل:"
@@ -211,7 +222,6 @@ jobs:
           echo "org.gradle.caching=true" >> gradle.properties
           echo "android.useAndroidX=true" >> gradle.properties
           echo "kotlin.code.style=official" >> gradle.properties
-          # ⚠️ لا نضيف resValue
 
       - name: Grant execute permission for gradlew
         working-directory: source
